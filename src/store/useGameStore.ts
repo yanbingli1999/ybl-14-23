@@ -26,8 +26,8 @@ import {
   triggerSpecialCandy,
 } from '@/engine/matchEngine';
 import { loadCandiesToTrain, clearTrain } from '@/engine/loadingSystem';
-import { calculateDispatchResult } from '@/engine/dispatchSystem';
-import { generateOrder } from '@/engine/contractSystem';
+import { calculateDispatchResult, advanceToNextBatch } from '@/engine/dispatchSystem';
+import { generateOrder, getCurrentBatch } from '@/engine/contractSystem';
 import {
   loadProfile,
   saveProfile,
@@ -299,18 +299,43 @@ const useGameStore = create<GameStore>((set, get) => {
         result.reputationChange
       );
 
+      let updatedOrder = currentOrder;
+      if (result.isBatchContract && result.contractProgress && !result.allBatchesCompleted && result.success) {
+        updatedOrder = advanceToNextBatch(currentOrder, result.contractProgress);
+      }
+
       set({
         gamePhase: 'result',
         dispatchResult: result,
         profile: newProfile,
         stats: loadStats(),
+        currentOrder: updatedOrder,
       });
 
-      clearGameState();
+      if (!result.isBatchContract || result.allBatchesCompleted || !result.success) {
+        clearGameState();
+      } else {
+        get().persist();
+      }
     },
 
     nextOrder: () => {
-      const { currentStationId, profile } = get();
+      const { currentStationId, profile, currentOrder, dispatchResult } = get();
+
+      if (dispatchResult?.isBatchContract && !dispatchResult.allBatchesCompleted && dispatchResult.success) {
+        set({
+          gamePhase: 'playing',
+          dispatchResult: null,
+          board: createInitialBoard(),
+          score: 0,
+          moves: GAME_CONFIG.INITIAL_MOVES,
+          combo: 0,
+          maxCombo: 0,
+        });
+        get().persist();
+        return;
+      }
+
       const newOrder = generateOrder(currentStationId, profile.reputation);
 
       set(state => ({
@@ -363,14 +388,30 @@ const useGameStore = create<GameStore>((set, get) => {
     },
 
     closeResult: () => {
-      set({ gamePhase: 'playing', dispatchResult: null });
+      const { currentOrder, dispatchResult } = get();
+
+      if (dispatchResult?.isBatchContract && !dispatchResult.allBatchesCompleted && dispatchResult.success) {
+        set({
+          gamePhase: 'playing',
+          dispatchResult: null,
+          board: createInitialBoard(),
+          score: 0,
+          moves: GAME_CONFIG.INITIAL_MOVES,
+          combo: 0,
+          maxCombo: 0,
+        });
+        get().persist();
+      } else {
+        set({ gamePhase: 'playing', dispatchResult: null });
+      }
     },
 
     changeStation: (stationId: string) => {
-      const { profile } = get();
+      const { profile, gamePhase } = get();
       const station = STATIONS.find(s => s.id === stationId);
 
       if (!station || station.reputationRequired > profile.reputation) return;
+      if (gamePhase !== 'playing') return;
 
       const newOrder = generateOrder(stationId, profile.reputation);
 
@@ -378,8 +419,14 @@ const useGameStore = create<GameStore>((set, get) => {
         currentStationId: stationId,
         currentOrder: newOrder,
         train: clearTrain(state.train),
+        board: createInitialBoard(),
+        score: 0,
+        moves: GAME_CONFIG.INITIAL_MOVES,
+        combo: 0,
+        maxCombo: 0,
       }));
 
+      clearGameState();
       get().persist();
     },
   };

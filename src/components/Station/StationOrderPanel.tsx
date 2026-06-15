@@ -1,7 +1,8 @@
 import useGameStore from '@/store/useGameStore';
 import { CANDY_CONFIG, STATIONS } from '@/data/config';
 import { getCandyLoad } from '@/engine/loadingSystem';
-import { MapPin, Flame, Coins, AlertTriangle } from 'lucide-react';
+import { getCurrentBatch } from '@/engine/contractSystem';
+import { MapPin, Flame, Coins, AlertTriangle, Package, Clock, Lock } from 'lucide-react';
 
 export default function StationOrderPanel() {
   const { currentOrder, train, currentStationId, profile, changeStation } = useGameStore();
@@ -12,6 +13,11 @@ export default function StationOrderPanel() {
   const availableStations = STATIONS.filter(
     s => s.reputationRequired <= profile.reputation
   );
+
+  const currentBatch = currentOrder.isBatchContract ? getCurrentBatch(currentOrder) : null;
+  const displayItems = currentBatch?.items || currentOrder.items;
+  const totalReward = currentOrder.reward;
+  const lockedReward = currentOrder.batches?.reduce((sum, b) => sum + b.lockedReward, 0) || 0;
 
   return (
     <div
@@ -30,12 +36,61 @@ export default function StationOrderPanel() {
             急单
           </span>
         )}
+        {currentOrder.isBatchContract && (
+          <span className="flex items-center gap-1 px-2 py-0.5 bg-purple-500 text-white text-xs font-bold rounded-full">
+            <Package className="w-3 h-3" />
+            分批合同
+          </span>
+        )}
       </div>
 
+      {currentOrder.isBatchContract && currentOrder.batches && (
+        <div className="mb-4 p-3 bg-purple-50 rounded-xl border border-purple-200">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-purple-600" />
+              <span className="text-sm font-semibold text-purple-700">
+                第 {currentOrder.currentBatchIndex! + 1} / {currentOrder.totalBatches} 批
+              </span>
+            </div>
+            {lockedReward > 0 && (
+              <div className="flex items-center gap-1 text-yellow-600">
+                <Lock className="w-3 h-3" />
+                <span className="text-xs font-medium">已锁定 +{lockedReward}</span>
+              </div>
+            )}
+          </div>
+          <div className="flex gap-1">
+            {currentOrder.batches.map((batch, idx) => (
+              <div
+                key={batch.id}
+                className={`flex-1 h-2 rounded-full transition-all duration-300 ${
+                  batch.isDelivered
+                    ? batch.isLate
+                      ? 'bg-red-400'
+                      : 'bg-green-500'
+                    : idx === currentOrder.currentBatchIndex
+                    ? 'bg-purple-400 animate-pulse'
+                    : 'bg-gray-300'
+                }`}
+              />
+            ))}
+          </div>
+          {(currentOrder.accumulatedReward || 0) > 0 && (
+            <div className="mt-2 text-xs text-purple-600 flex items-center gap-1">
+              <Coins className="w-3 h-3" />
+              累计奖励: +{currentOrder.accumulatedReward}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mb-4">
-        <h4 className="text-sm font-semibold text-gray-600 mb-2">订单需求</h4>
+        <h4 className="text-sm font-semibold text-gray-600 mb-2">
+          {currentOrder.isBatchContract ? `本批需求` : `订单需求`}
+        </h4>
         <div className="space-y-2">
-          {currentOrder.items.map((item, index) => {
+          {displayItems.map((item, index) => {
             const config = CANDY_CONFIG[item.candyType];
             const loaded = getCandyLoad(train, item.candyType);
             const progress = Math.min((loaded / item.quantity) * 100, 100);
@@ -72,15 +127,18 @@ export default function StationOrderPanel() {
         <div className="flex items-center gap-1 text-yellow-600">
           <Coins className="w-4 h-4" />
           <span className="font-bold">
-            +{currentOrder.reward}
+            +{currentBatch ? currentBatch.reward : totalReward}
             {currentOrder.isUrgent && (
               <span className="text-red-500 ml-1">(+{currentOrder.urgentBonus} 加急)</span>
+            )}
+            {currentOrder.isBatchContract && (
+              <span className="text-purple-500 ml-1 text-xs">/ 总计 +{totalReward}</span>
             )}
           </span>
         </div>
         <div className="flex items-center gap-1 text-red-500">
           <AlertTriangle className="w-4 h-4" />
-          <span>罚金 -{currentOrder.penalty}</span>
+          <span>罚金 -{currentBatch ? currentBatch.penalty : currentOrder.penalty}</span>
         </div>
       </div>
 

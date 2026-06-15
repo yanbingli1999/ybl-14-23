@@ -51,6 +51,31 @@ export interface OrderItem {
   quantity: number;
 }
 
+export interface Batch {
+  id: string;
+  batchNumber: number;
+  items: OrderItem[];
+  reward: number;
+  penalty: number;
+  isDelivered: boolean;
+  isLate: boolean;
+  lockedReward: number;
+}
+
+export interface BatchResult {
+  batchId: string;
+  batchNumber: number;
+  success: boolean;
+  matchRate: number;
+  reward: number;
+  penalty: number;
+  lockedReward: number;
+  reclaimedReward: number;
+  mismatches: OrderItem[];
+  correctItems: OrderItem[];
+  reputationChange: number;
+}
+
 export interface StationOrder {
   id: string;
   stationId: string;
@@ -60,6 +85,25 @@ export interface StationOrder {
   penalty: number;
   isUrgent: boolean;
   urgentBonus: number;
+  isBatchContract?: boolean;
+  totalBatches?: number;
+  currentBatchIndex?: number;
+  batches?: Batch[];
+  accumulatedReward?: number;
+  accumulatedPenalty?: number;
+}
+
+export type ContractStatus = 'in_progress' | 'completed' | 'failed';
+
+export interface ContractProgress {
+  orderId: string;
+  status: ContractStatus;
+  currentBatchIndex: number;
+  batches: Batch[];
+  accumulatedReward: number;
+  accumulatedPenalty: number;
+  totalReward: number;
+  totalPenalty: number;
 }
 
 export interface Station {
@@ -102,6 +146,10 @@ export interface DispatchResult {
   mismatches: OrderItem[];
   correctItems: OrderItem[];
   reputationChange: number;
+  isBatchContract?: boolean;
+  batchResult?: BatchResult;
+  contractProgress?: ContractProgress;
+  allBatchesCompleted?: boolean;
 }
 
 export interface StatsStep {

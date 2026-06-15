@@ -1,4 +1,4 @@
-import { StationOrder, OrderItem, Station, CandyType, BASIC_CANDY_TYPES } from '@/types';
+import { StationOrder, OrderItem, Station, CandyType, BASIC_CANDY_TYPES, Batch } from '@/types';
 import { STATIONS, GAME_CONFIG } from '@/data/config';
 
 function generateId(): string {
@@ -21,6 +21,11 @@ export function generateOrder(stationId: string, reputation: number): StationOrd
   }
 
   const difficultyLevel = getDifficultyLevel(stationId, reputation);
+
+  if (shouldGenerateBatchContract(difficultyLevel)) {
+    return generateBatchOrder(stationId, reputation);
+  }
+
   const itemCount = getItemCount(difficultyLevel);
   const baseQuantity = getBaseQuantity(difficultyLevel);
 
@@ -119,4 +124,106 @@ export function getStationProgress(reputation: number): { current: Station | nul
   }
 
   return { current, next, progress: Math.min(progress, 100) };
+}
+
+export function shouldGenerateBatchContract(difficultyLevel: number): boolean {
+  if (difficultyLevel < 3) return false;
+  return Math.random() < GAME_CONFIG.BATCH_CONTRACT_CHANCE;
+}
+
+export function generateBatchOrder(stationId: string, reputation: number): StationOrder {
+  const baseOrder = generateOrder(stationId, reputation);
+  const difficultyLevel = getDifficultyLevel(stationId, reputation);
+  const batchCount = Math.min(
+    GAME_CONFIG.BATCH_MAX_COUNT,
+    Math.max(GAME_CONFIG.BATCH_MIN_COUNT, Math.floor(difficultyLevel / 2) + 1)
+  );
+
+  const batches = splitOrderIntoBatches(baseOrder, batchCount);
+  const totalReward = batches.reduce((sum, b) => sum + b.reward, 0);
+  const totalPenalty = batches.reduce((sum, b) => sum + b.penalty, 0);
+
+  return {
+    ...baseOrder,
+    isBatchContract: true,
+    totalBatches: batchCount,
+    currentBatchIndex: 0,
+    batches,
+    reward: totalReward,
+    penalty: totalPenalty,
+    accumulatedReward: 0,
+    accumulatedPenalty: 0,
+  };
+}
+
+function splitOrderIntoBatches(order: StationOrder, batchCount: number): Batch[] {
+  const batches: Batch[] = [];
+  const totalReward = order.reward;
+  const baseBatchReward = Math.floor(totalReward / batchCount);
+
+  for (let i = 0; i < batchCount; i++) {
+    const batchItems: OrderItem[] = order.items.map(item => {
+      const baseQty = Math.floor(item.quantity / batchCount);
+      const remainder = item.quantity % batchCount;
+      const extra = i < remainder ? 1 : 0;
+      return {
+        candyType: item.candyType,
+        quantity: baseQty + extra,
+      };
+    }).filter(item => item.quantity > 0);
+
+    const batchReward = i === batchCount - 1
+      ? totalReward - baseBatchReward * (batchCount - 1)
+      : baseBatchReward;
+
+    const batchPenalty = Math.floor(
+      batchItems.reduce((sum, item) => sum + item.quantity * 5, 0) *
+      GAME_CONFIG.MISMATCH_PENALTY_RATE * batchItems.length
+    );
+
+    batches.push({
+      id: generateId(),
+      batchNumber: i + 1,
+      items: batchItems,
+      reward: batchReward,
+      penalty: batchPenalty,
+      isDelivered: false,
+      isLate: false,
+      lockedReward: 0,
+    });
+  }
+
+  return batches;
+}
+
+export function getCurrentBatch(order: StationOrder): Batch | null {
+  if (!order.isBatchContract || !order.batches || order.currentBatchIndex === undefined) {
+    return null;
+  }
+  if (order.currentBatchIndex >= order.batches.length) {
+    return null;
+  }
+  return order.batches[order.currentBatchIndex];
+}
+
+export function calculateBatchLockedReward(batch: Batch, matchRate: number): number {
+  if (matchRate >= 0.8) {
+    return Math.floor(batch.reward * GAME_CONFIG.BATCH_LOCK_REWARD_RATE);
+  }
+  return 0;
+}
+
+export function calculateReclaimedReward(lockedReward: number): number {
+  return Math.floor(lockedReward * GAME_CONFIG.BATCH_RECLAIM_RATE);
+}
+
+export function isLastBatch(order: StationOrder): boolean {
+  if (!order.isBatchContract || !order.batches || order.currentBatchIndex === undefined) {
+    return true;
+  }
+  return order.currentBatchIndex >= order.batches.length - 1;
+}
+
+export function getContractCompletionBonus(totalReward: number): number {
+  return Math.floor(totalReward * GAME_CONFIG.BATCH_COMPLETION_BONUS_RATE);
 }
