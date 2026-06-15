@@ -87,11 +87,11 @@ function calculateBatchDispatchResult(
     return calculateSingleDispatchResult(train, order);
   }
 
-  const batchResult = calculateSingleBatchResult(train, currentBatch, order);
+  const batchResult = calculateSingleBatchResult(train, currentBatch, order, order.batches!);
   const contractProgress = updateContractProgress(order, batchResult);
   const allBatchesCompleted = contractProgress.status === 'completed' || contractProgress.status === 'failed';
 
-  let totalReward = batchResult.reward;
+  let totalReward = batchResult.reward - batchResult.reclaimedReward;
   let totalPenalty = batchResult.penalty;
   let totalRepChange = batchResult.reputationChange;
 
@@ -119,7 +119,8 @@ function calculateBatchDispatchResult(
 function calculateSingleBatchResult(
   train: Train,
   batch: Batch,
-  order: StationOrder
+  order: StationOrder,
+  allBatches: Batch[]
 ): BatchResult {
   const correctItems: OrderItem[] = [];
   const mismatches: OrderItem[] = [];
@@ -155,8 +156,9 @@ function calculateSingleBatchResult(
   const lockedReward = calculateBatchLockedReward(batch, matchRate);
 
   let reclaimedReward = 0;
-  if (!success && batch.lockedReward > 0) {
-    reclaimedReward = calculateReclaimedReward(batch.lockedReward);
+  if (!success) {
+    const totalLockedReward = allBatches.reduce((sum, b) => sum + b.lockedReward, 0);
+    reclaimedReward = calculateReclaimedReward(totalLockedReward);
   }
 
   let reward = 0;

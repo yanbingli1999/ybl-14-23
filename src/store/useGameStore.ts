@@ -388,7 +388,7 @@ const useGameStore = create<GameStore>((set, get) => {
     },
 
     closeResult: () => {
-      const { currentOrder, dispatchResult } = get();
+      const { currentOrder, dispatchResult, currentStationId, profile } = get();
 
       if (dispatchResult?.isBatchContract && !dispatchResult.allBatchesCompleted && dispatchResult.success) {
         set({
@@ -401,19 +401,58 @@ const useGameStore = create<GameStore>((set, get) => {
           maxCombo: 0,
         });
         get().persist();
+      } else if (dispatchResult?.isBatchContract && dispatchResult.allBatchesCompleted) {
+        const newOrder = generateOrder(currentStationId, profile.reputation);
+        set(state => ({
+          gamePhase: 'playing',
+          dispatchResult: null,
+          train: clearTrain(state.train),
+          currentOrder: newOrder,
+          board: createInitialBoard(),
+          score: 0,
+          moves: GAME_CONFIG.INITIAL_MOVES,
+          combo: 0,
+          maxCombo: 0,
+        }));
+        clearGameState();
+        get().persist();
       } else {
         set({ gamePhase: 'playing', dispatchResult: null });
       }
     },
 
     changeStation: (stationId: string) => {
-      const { profile, gamePhase } = get();
+      const { profile, gamePhase, currentOrder } = get();
       const station = STATIONS.find(s => s.id === stationId);
 
       if (!station || station.reputationRequired > profile.reputation) return;
       if (gamePhase !== 'playing') return;
 
-      const newOrder = generateOrder(stationId, profile.reputation);
+      let newCoins = profile.coins;
+      let newReputation = profile.reputation;
+
+      if (currentOrder?.isBatchContract && currentOrder.batches) {
+        const totalLockedReward = currentOrder.batches.reduce((sum, b) => sum + b.lockedReward, 0);
+        if (totalLockedReward > 0) {
+          const reclaimed = Math.floor(totalLockedReward * GAME_CONFIG.BATCH_RECLAIM_RATE);
+          newCoins = Math.max(0, newCoins - reclaimed);
+          newReputation = Math.max(0, newReputation + GAME_CONFIG.BATCH_REPUTATION_PER_FAIL);
+        }
+      }
+
+      const newUnlocked = checkUnlockedStations(newReputation);
+
+      const newProfile: PlayerProfile = {
+        ...profile,
+        coins: newCoins,
+        reputation: newReputation,
+        unlockedStations: newUnlocked,
+        level: Math.floor(newReputation / 100) + 1,
+      };
+
+      saveProfile(newProfile);
+
+      const newOrder = generateOrder(stationId, newReputation);
 
       set(state => ({
         currentStationId: stationId,
@@ -424,6 +463,7 @@ const useGameStore = create<GameStore>((set, get) => {
         moves: GAME_CONFIG.INITIAL_MOVES,
         combo: 0,
         maxCombo: 0,
+        profile: newProfile,
       }));
 
       clearGameState();
